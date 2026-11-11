@@ -85,7 +85,7 @@
 ## 4. 안전성 및 정책
 
 - 승인 전 Google Calendar는 변경되지 않는다. 관리자 승인 실행 때만 삽입/삭제.
-- 인증: 제출자/관리자 역할별 암호, HttpOnly+Secure 세션 쿠키, CSRF 검증.
+- 인증: 사용자별 ID+Argon2id 비밀번호 해시, DB에 저장되는 취소 가능 opaque 세션(HttpOnly+Secure+SameSite=Strict), CSRF 및 Origin 검증. viewer/submitter/admin 역할 분리.
 - 원본 JSON의 \`calendarId\`를 무시하고 고정 Calendar ID만 사용.
 - 삽입 요청에는 batchId/item 순서의 멱등성, Google 이벤트에는 미리 생성한 이벤트 ID를 사용해 반복 실행 중복을 방지한다.
 - 삭제는 **CalSync 웹 UI에서 선택한 Google event ID를 기반**으로 한다. 원본 JSON 항목이 파일에서 사라졌다는 이유만으로 자동 삭제하지 않는다.
@@ -115,7 +115,7 @@
 3. Menlo Browser가 JSON 텍스트 붙여넣기와 같은 원점 fetch POST를 허용하는지.
 4. 실제 JSON 파일의 최상위 구조 및 날짜 타입, 시간대 표기, 삭제 상태 표현.
 5. 수동 입력에서 '내용/참석자/메모'를 Google에 어떻게 보존할지, 참석자 초대 알림이 필요한지.
-6. 다수 사용자/관리자별 계정 분리 및 승인 자동화 여부.
+6. MFA/SSO 필요성, 사용자별 이벤트 접근 범위와 자동 승인 정책 (기본적으로 관리자 수동 승인).
 7. 업무 일정 및 개인정보 외부 전송에 대한 조직 승인 상태.
 8. 전송 성공 결과를 송신 PC로 어떻게 가져올지(현 직접 네트워크 제한하에서는 수동 확인).
 
@@ -125,3 +125,12 @@
 - [설치 및 배포](../README.md)
 - [Google Calendar Events API](https://developers.google.com/workspace/calendar/api/v3/reference/events)
 - [Google Calendar OAuth scopes](https://developers.google.com/workspace/calendar/api/auth)
+
+
+## 보안 구현 업데이트 (2026-11-11)
+
+- Docker 수신부는 **외부 HTTPS 443만 노출**한다. NPM이 TLS를 종료하며 Backend 8000은 사설 Docker 네트워크에서만 접근한다.
+- 인증은 JWT 대신 **Argon2id 비밀번호 + DB 기반 opaque 세션 쿠키**를 사용한다. 사용자 계정 관리와 세션 폐기 지원.
+- 조회/전송 API 전부 로그인 필수. 등록·삭제 요청은 submitter 또는 admin, Google API 실제 쓰기는 admin 승인 시만 허용.
+- 로그인 실패 제한, CSRF, Origin, CSP/HSTS 등 기본 보안 적용. 인프라 방화벽/프록시 요청 제한은 별도 설정 필요.
+- TLS는 **전송 중 암호화**이며 저장 데이터의 E2EE는 제공하지 않는다. DB와 OAuth 토큰 파일은 서버측 접근 제한 대상이다.
