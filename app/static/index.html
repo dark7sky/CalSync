@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CalSync</title>
+  <style>
+    :root{font:16px/1.55 system-ui,-apple-system,sans-serif;color:#233040;background:#f3f6fa}
+    *{box-sizing:border-box}
+    body{margin:0}
+    header{background:#18314d;color:white;padding:16px max(18px,calc((100vw - 1080px)/2))}
+    header strong{font-size:1.3rem}
+    main{max-width:1080px;margin:24px auto;padding:0 18px}
+    section{background:#fff;border:1px solid #dce4eb;border-radius:12px;padding:22px;margin-bottom:18px}
+    h2{margin:0 0 12px;font-size:1.1rem}
+    p{margin:10px 0}
+    .muted{color:#64748b}
+    .small{font-size:.88rem}
+    .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+    .row>*{flex:1}
+    label{display:block;margin:10px 0;font-weight:600}
+    label input{display:block;width:100%;margin-top:4px}
+    input,textarea,button{font:inherit;border-radius:6px}
+    input,textarea{border:1px solid #aebccb;padding:9px;background:#fff}
+    textarea{width:100%;height:180px;resize:vertical;font:13px/1.4 ui-monospace,monospace}
+    button{cursor:pointer;border:1px solid #476781;padding:7px 12px;background:white;color:#18314d}
+    button.primary{color:white;background:#21547c;border-color:#21547c}
+    button:disabled{opacity:.55;cursor:default}
+    .message{white-space:pre-wrap;margin:12px 0;padding:10px;background:#f0f4f8;border-radius:6px;min-height:30px}
+    .error{background:#fee2e2;color:#8a2525}
+    .success{background:#dcfce7;color:#14532d}
+    .event,.request{border-top:1px solid #e3e9ef;padding:12px 0}
+    .event:first-child,.request:first-child{border:0}
+    .event strong,.request strong{display:block}
+    .event button,.request button{margin-top:6px;margin-right:6px}
+    @media(max-width:700px){.row>*{flex-basis:100%}}
+  </style>
+</head>
+<body>
+<header><strong>CalSync</strong> <span class="small" id="role"></span>
+  <button style="float:right" id="logout">로그아웃</button>
+</header>
+<main>
+  <section>
+    <h2>캘린더 조회</h2>
+    <p class="muted small">서버가 지정한 한 개의 Google Calendar만 조회합니다. 삭제 요청은 관리자가 승인하기 전까지 실제 일정에 반영되지 않습니다.</p>
+    <button id="refreshEvents">일정 새로고침</button>
+    <div id="events" aria-live="polite"></div>
+  </section>
+
+  <section>
+    <h2>일정 직접 입력</h2>
+    <p class="muted small">기존 Menlo 브라우저 폼 입력 방식과 호환되는 1건 등록 요청입니다.</p>
+    <form id="singleForm">
+      <label>제목 <input id="subject" required maxlength="250"></label>
+      <div class="row">
+        <label>시작 <input id="start" type="datetime-local" required></label>
+        <label>종료 <input id="end" type="datetime-local" required></label>
+      </div>
+      <label>장소 <input id="location" maxlength="1000"></label>
+      <label>주최자 이름 <input id="chair" maxlength="320"></label>
+      <button class="primary" type="submit">생성 요청 제출</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>JSON 일괄 등록 요청</h2>
+    <p class="muted small">클라이언트가 준비한 JSON 이벤트 배열, 단일 이벤트 객체 또는 {"events":[...]} 형태를 붙여넣으세요. 전송되는 이벤트 내용은 subject/startTime/endTime/chair/location만 사용합니다. 한 번에 최대 100개입니다.</p>
+    <textarea id="importText" spellcheck="false" placeholder='[{"subject":"예시 일정","startTime":{"dateTime":"2026-11-12T10:00:00+09:00","timeZone":"Asia/Seoul"},"endTime":{"dateTime":"2026-11-12T11:00:00+09:00","timeZone":"Asia/Seoul"},"chair":{"displayName":"가상 사용자"},"location":"예시 장소"}]'></textarea>
+    <p><button id="sendBatch" class="primary">일괄 생성 요청 제출</button></p>
+    <p class="muted small">Menlo에서 클립보드가 차단되어 있다면 위의 직접 입력을 이용하세요. 등록은 기본적으로 관리자 승인 이후 실행됩니다.</p>
+  </section>
+
+  <section>
+    <div class="row"><h2>요청 및 처리 현황</h2><button id="refreshRequests">새로고침</button></div>
+    <div id="requests" aria-live="polite"></div>
+  </section>
+
+  <div id="message" class="message" role="status">준비 중</div>
+</main>
+<script>
+"use strict";
+let csrf = "";
+let role = "";
+let pendingBatchId = null;
+
+const el = id => document.getElementById(id);
+const text = (parent, tag, value, className="") => {
+  const node = document.createElement(tag);
+  node.textContent = value == null ? "" : String(value);
+  if (className) node.className = className;
+  parent.appendChild(node);
+  return node;
+};
+function message(msg, type="") {
+  el("message").textContent = msg;
+  el("message").className = "message " + type;
+}
+async function call(path, options={}) {
+  const method = options.method || "GET";
+  const headers = {...(options.headers || {})};
+  if (method !== "GET") {
+    headers["X-CSRF-Token"] = csrf;
+    if (options.body) headers["Content-Type"] = "application/json";
+  }
+  const response = await fetch(path, {
+    credentials:"same-origin", cache:"no-store", ...options, headers
+  });
+  if (response.status === 401) { location.href = "/login"; throw new Error("로그인이 필요합니다"); }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(
+    (typeof data.detail === "string" ? data.detail : "HTTP " + response.status)
+  );
+  return data;
+}
+function fmtTime(t) {
+  return (t && (t.dateTime || t.date)) || "";
+}
+function button(parent, label, action) {
+  const b = text(parent, "button", label);
+  b.type = "button";
+  b.addEventListener("click", async () => {
+    b.disabled = true;
+    try { await action(); } catch(e) { message(e.message, "error"); }
+    finally { b.disabled = false; }
+  });
+  return b;
+}
+async function refreshEvents() {
+  const holder = el("events");
+  holder.replaceChildren();
+  try {
+    const data = await call("/api/v1/events");
+    for (const e of data.events) {
+      const item = document.createElement("div");
+      item.className = "event";
+      text(item, "strong", e.summary);
+      text(item, "div", fmtTime(e.start) + " ~ " + fmtTime(e.end));
+      if (e.location) text(item, "div", e.location, "muted");
+      button(item, "삭제 요청", async () => {
+        if (!confirm("이 일정의 삭제 요청을 제출할까요? 실제 삭제는 관리자 승인 후 진행됩니다.")) return;
+        await call("/api/v1/requests/delete", {
+          method:"POST", body: JSON.stringify({eventId:e.id,expectedEtag:e.etag})
+        });
+        message("삭제 요청을 접수했습니다.", "success");
+        await refreshRequests();
+      });
+      holder.appendChild(item);
+    }
+    if (data.events.length === 0) text(holder, "p", "표시할 일정이 없습니다.", "muted");
+    if (data.truncated) text(holder, "p", "결과 일부만 표시됩니다.", "muted");
+  } catch(e) {
+    text(holder, "p", "일정 조회 실패: " + e.message, "muted");
+  }
+}
+async function refreshRequests() {
+  const holder = el("requests");
+  holder.replaceChildren();
+  try {
+    const data = await call("/api/v1/requests");
+    for (const r of data.requests) {
+      const item = document.createElement("div");
+      item.className = "request";
+      text(item, "strong", r.operation.toUpperCase() + " · " + r.status);
+      text(item, "div", r.created_at + " | " + r.id, "muted small");
+      if (r.last_error) text(item, "div", r.last_error, "error");
+      if (role === "admin" && r.status === "PENDING") {
+        button(item, "승인/실행", async () => {
+          if (!confirm("Google Calendar에 이 요청을 실제 반영할까요?")) return;
+          await call("/api/v1/admin/requests/" + r.id + "/approve", {method:"POST"});
+          message("승인되어 실행됐습니다.", "success");
+          await refreshRequests();
+          await refreshEvents();
+        });
+        button(item, "거절", async () => {
+          await call("/api/v1/admin/requests/" + r.id + "/reject", {method:"POST"});
+          await refreshRequests();
+        });
+      }
+      if (role === "admin" && r.status === "FAILED") {
+        button(item, "실패건 재시도", async () => {
+          if (!confirm("실패 원인을 확인했습니까? 동일 Google 이벤트 ID로 재시도합니다.")) return;
+          await call("/api/v1/admin/requests/" + r.id + "/approve", {method:"POST"});
+          await refreshRequests();
+        });
+      }
+      holder.appendChild(item);
+    }
+    if (data.requests.length === 0) text(holder, "p", "접수된 요청이 없습니다.", "muted");
+  } catch(e) { message("요청 조회 실패: " + e.message, "error"); }
+}
+function batchId() {
+  if (crypto.randomUUID) return crypto.randomUUID().replace(/-/g,"");
+  return "batch" + Date.now() + Math.floor(Math.random()*1e9).toString(36);
+}
+async function submitEvents(events, stableBatchId) {
+  if (!Array.isArray(events) || !events.length || events.length > 100) {
+    throw new Error("1~100개의 이벤트가 필요합니다");
+  }
+  const data = await call("/api/v1/requests/import", {
+    method:"POST", body:JSON.stringify({batchId:stableBatchId, events})
+  });
+  message(data.requests.length + "건의 생성 요청을 접수했습니다. batchId: " + data.batchId, "success");
+  await refreshRequests();
+}
+el("singleForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Seoul";
+  const event = {
+    subject:el("subject").value,
+    startTime:{dateTime:el("start").value,timeZone:tz},
+    endTime:{dateTime:el("end").value,timeZone:tz},
+    chair:{displayName:el("chair").value},
+    location:el("location").value
+  };
+  try { await submitEvents([event], batchId()); e.target.reset(); }
+  catch(err) { message(err.message, "error"); }
+});
+el("importText").addEventListener("input", () => { pendingBatchId=null; });
+el("sendBatch").addEventListener("click", async () => {
+  try {
+    const input = JSON.parse(el("importText").value);
+    const events = Array.isArray(input) ? input : Array.isArray(input.events) ? input.events : [input];
+    if (!pendingBatchId) pendingBatchId = batchId();
+    await submitEvents(events, pendingBatchId);
+    el("importText").value="";
+    pendingBatchId=null;
+  } catch(err) { message(err.message, "error"); }
+});
+el("refreshEvents").addEventListener("click", refreshEvents);
+el("refreshRequests").addEventListener("click", refreshRequests);
+el("logout").addEventListener("click", async () => {
+  try { await call("/api/v1/logout",{method:"POST"}); location.href="/login"; }
+  catch(err){ message(err.message,"error"); }
+});
+(async () => {
+  try {
+    const user = await call("/api/v1/session");
+    role = user.role; csrf = user.csrfToken;
+    el("role").textContent = " · " + (role === "admin" ? "관리자" : "제출자");
+    message("로그인 완료. 날짜/내용을 확인한 후 제출하세요.");
+    await Promise.all([refreshEvents(),refreshRequests()]);
+  } catch(e) { message(e.message,"error"); }
+})();
+</script>
+</body></html>
