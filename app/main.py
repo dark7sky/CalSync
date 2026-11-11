@@ -4,26 +4,23 @@
 """
 from __future__ import annotations
 
-import hashlib
 import hmac
 import json
 import os
-import secrets
 import sqlite3
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from html import escape
 from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from app import security
 from pydantic import BaseModel, Field
 
 SCOPE = "https://www.googleapis.com/auth/calendar.events"
@@ -40,10 +37,6 @@ def setting(name: str) -> str:
     return v
 
 
-def serializer() -> URLSafeTimedSerializer:
-    return URLSafeTimedSerializer(setting("CALSYNC_SESSION_SECRET"), salt="calsync-session-v1")
-
-
 def database_path() -> str:
     return os.getenv("CALSYNC_DATABASE", "/data/calsync.db")
 
@@ -52,19 +45,14 @@ def db() -> sqlite3.Connection:
     conn = sqlite3.connect(database_path(), timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=15000")
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
 @app.on_event("startup")
 def startup():
-    for key in (
-        "CALSYNC_CALENDAR_ID", "CALSYNC_PUBLIC_ORIGIN",
-        "CALSYNC_SESSION_SECRET", "CALSYNC_SUBMITTER_PASSWORD",
-        "CALSYNC_ADMIN_PASSWORD",
-    ):
+    for key in ("CALSYNC_CALENDAR_ID", "CALSYNC_PUBLIC_ORIGIN"):
         setting(key)
-    if len(setting("CALSYNC_SESSION_SECRET")) < 32:
-        raise RuntimeError("CALSYNC_SESSION_SECRET must be at least 32 chars")
     origin = urlsplit(setting("CALSYNC_PUBLIC_ORIGIN"))
     if origin.scheme != "https" or not origin.netloc or origin.path not in ("", "/"):
         raise RuntimeError("CALSYNC_PUBLIC_ORIGIN must be the public HTTPS origin")
@@ -72,6 +60,7 @@ def startup():
     path.parent.mkdir(parents=True, exist_ok=True)
     with db() as conn:
         conn.execute("PRAGMA journal_mode=WAL")
+        security.initialize(conn)
         conn.execute("""CREATE TABLE IF NOT EXISTS requests (
             id TEXT PRIMARY KEY,
             batch_key TEXT,
@@ -83,25 +72,46 @@ def startup():
             google_event_id TEXT,
             status TEXT NOT NULL,
             actor TEXT NOT NULL,
+            actor_id TEXT,
             created_at TEXT NOT NULL,
             last_error TEXT,
             UNIQUE(batch_key, batch_index)
         )""")
+        columns = {r["name"] for r in conn.execute("PRAGMA table_info(requests)")}
+        if "actor_id" not in columns:
+            conn.execute("ALTER TABLE requests ADD COLUMN actor_id TEXT")
+
+
+@app.middleware("http")
+async def secure_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'none'; script-src 'self'; style-src 'self'; "
+        "connect-src 'self'; img-src 'self'; form-action 'self'; "
+        "frame-ancestors 'none'; base-uri 'none';"
+    )
+    # Nginx Proxy Manager serves the public HTTPS origin.
+    response.headers["Strict-Transport-Security"] = "max-age=31536000"
+    return response
 
 
 def session(request: Request) -> dict:
     token = request.cookies.get(SESSION_COOKIE)
-    if not token:
-        raise HTTPException(401, "Login required")
-    try:
-        data = serializer().loads(
-            token, max_age=int(os.getenv("CALSYNC_SESSION_MAX_AGE_SECONDS", "43200"))
-        )
-    except (BadSignature, SignatureExpired):
-        raise HTTPException(401, "Session expired")
-    if not isinstance(data, dict) or data.get("role") not in ("submitter", "admin"):
-        raise HTTPException(401, "Invalid session")
+    with db() as conn:
+        data = security.get_session(conn, token)
+    if data is None:
+        raise HTTPException(401, "Login required or session expired")
     return data
+
+
+def submitter(user: dict = Depends(require_csrf)) -> dict:
+    if user["role"] not in ("submitter", "admin"):
+        raise HTTPException(403, "Submit permission required")
+    return user
 
 
 def require_csrf(request: Request, user: dict = Depends(session),
@@ -228,33 +238,43 @@ def health():
 def login_page():
     return HTMLResponse("""<!doctype html><html lang="ko"><meta charset="utf-8">
 <title>CalSync Login</title><meta name="viewport" content="width=device-width">
-<body><h1>CalSync</h1><form method="POST" action="/login">
-<label>접속 암호 <input name="password" type="password" autocomplete="current-password" required></label>
-<button type="submit">로그인</button></form></body></html>""")
+<link rel="stylesheet" href="/static/style.css">
+<body><main><section><h1>CalSync 로그인</h1>
+<form method="POST" action="/login" autocomplete="on">
+<label>사용자 이름 <input name="username" autocomplete="username" required maxlength="64"></label>
+<label>비밀번호 <input name="password" type="password" autocomplete="current-password" required></label>
+<button class="primary" type="submit">로그인</button>
+</form></section></main></body></html>""")
 
 
 @app.post("/login")
-def login(password: str = Form(...)):
-    role = None
-    if hmac.compare_digest(password, setting("CALSYNC_ADMIN_PASSWORD")):
-        role = "admin"
-    elif hmac.compare_digest(password, setting("CALSYNC_SUBMITTER_PASSWORD")):
-        role = "submitter"
-    if role is None:
-        return HTMLResponse("로그인 실패", status_code=401)
-    token = serializer().dumps({"role": role, "csrf": secrets.token_urlsafe(32)})
+def login(request: Request, username: str = Form(...), password: str = Form(...)):
+    origin = request.headers.get("origin")
+    if origin and origin.rstrip("/") != setting("CALSYNC_PUBLIC_ORIGIN").rstrip("/"):
+        raise HTTPException(403, "Unexpected Origin")
+    with db() as conn:
+        try:
+            user = security.verify_credentials(conn, username, password)
+        except ValueError:
+            raise HTTPException(429, "Too many login attempts. Retry later")
+        if user is None:
+            return HTMLResponse("사용자 이름 또는 비밀번호가 올바르지 않습니다.", status_code=401)
+        max_age = int(os.getenv("CALSYNC_SESSION_MAX_AGE_SECONDS", "43200"))
+        token = security.create_session(conn, user["id"], max_age=max_age)
     response = RedirectResponse("/", status_code=303)
     response.set_cookie(
         SESSION_COOKIE, token, httponly=True, secure=True, samesite="strict",
-        max_age=int(os.getenv("CALSYNC_SESSION_MAX_AGE_SECONDS", "43200")),
+        max_age=max_age, path="/",
     )
     return response
 
 
 @app.post("/api/v1/logout")
-def logout(user: dict = Depends(require_csrf)):
+def logout(request: Request, user: dict = Depends(require_csrf)):
+    with db() as conn:
+        security.revoke_session(conn, request.cookies.get(SESSION_COOKIE))
     response = JSONResponse({"ok": True})
-    response.delete_cookie(SESSION_COOKIE)
+    response.delete_cookie(SESSION_COOKIE, path="/")
     return response
 
 
@@ -264,13 +284,12 @@ def home(request: Request):
         session(request)
     except HTTPException:
         return RedirectResponse("/login")
-    from fastapi.responses import FileResponse
     return FileResponse(Path(__file__).parent / "static" / "index.html")
 
 
 @app.get("/api/v1/session")
 def me(user: dict = Depends(session)):
-    return {"role": user["role"], "csrfToken": user["csrf"]}
+    return {"role": user["role"], "username": user["username"], "csrfToken": user["csrf"]}
 
 
 @app.get("/api/v1/events")
@@ -303,7 +322,7 @@ def events(user: dict = Depends(session), timeMin: str | None = None, timeMax: s
 
 
 @app.post("/api/v1/requests/import")
-def import_events(body: ImportBatch, user: dict = Depends(require_csrf)):
+def import_events(body: ImportBatch, user: dict = Depends(submitter)):
     normalized = []
     for i, raw in enumerate(body.events):
         try:
@@ -311,13 +330,14 @@ def import_events(body: ImportBatch, user: dict = Depends(require_csrf)):
         except ValueError as e:
             raise HTTPException(422, f"events[{i}]: {e}")
     results = []
+    scoped_batch = user["id"] + ":" + body.batchId
     with db() as conn:
         conn.execute("BEGIN IMMEDIATE")
         for i, event in enumerate(normalized):
             payload = json.dumps(event, ensure_ascii=False, sort_keys=True)
             existing = conn.execute(
                 "SELECT id, payload, status FROM requests WHERE batch_key=? AND batch_index=?",
-                (body.batchId, i),
+                (scoped_batch, i),
             ).fetchone()
             if existing:
                 if existing["payload"] != payload:
@@ -327,16 +347,16 @@ def import_events(body: ImportBatch, user: dict = Depends(require_csrf)):
             rid = uuid.uuid4().hex
             google_id = "cs" + uuid.uuid4().hex  # Google ID base32hex-valid chars.
             conn.execute("""INSERT INTO requests
-                (id,batch_key,batch_index,operation,payload,google_event_id,status,actor,created_at)
-                VALUES (?,?,?,?,?,?,?,?,?)""",
-                (rid, body.batchId, i, "create", payload, google_id, "PENDING",
-                 user["role"], now_iso()))
+                (id,batch_key,batch_index,operation,payload,google_event_id,status,actor,actor_id,created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (rid, scoped_batch, i, "create", payload, google_id, "PENDING",
+                 user["username"], user["id"], now_iso()))
             results.append({"requestId": rid, "status": "PENDING"})
     return {"requests": results, "batchId": body.batchId}
 
 
 @app.post("/api/v1/requests/delete")
-def request_delete(body: DeleteRequest, user: dict = Depends(require_csrf)):
+def request_delete(body: DeleteRequest, user: dict = Depends(submitter)):
     # Requires Google event id from the server's currently displayed calendar.
     try:
         existing = calendar().events().get(
@@ -350,26 +370,29 @@ def request_delete(body: DeleteRequest, user: dict = Depends(require_csrf)):
     rid = uuid.uuid4().hex
     with db() as conn:
         conn.execute("""INSERT INTO requests
-            (id,operation,payload,event_id,expected_etag,status,actor,created_at)
-            VALUES (?,?,?,?,?,?,?,?)""",
+            (id,operation,payload,event_id,expected_etag,status,actor,actor_id,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
             (rid, "delete", "{}", body.eventId, existing.get("etag"), "PENDING",
-             user["role"], now_iso()))
+             user["username"], user["id"], now_iso()))
     return {"requestId": rid, "status": "PENDING"}
 
 
 @app.get("/api/v1/requests")
 def list_requests(user: dict = Depends(session)):
     with db() as conn:
-        rows = conn.execute("""SELECT id, operation, status, actor, created_at,
-            event_id, google_event_id, last_error, payload FROM requests
-            ORDER BY created_at DESC LIMIT 200""").fetchall()
-    # Current MVP has shared submitter credentials; use per-user auth before multi-tenant rollout.
-    def formatted(r):
-        data = dict(r)
+        sql = """SELECT id, operation, status, actor, created_at,
+            event_id, google_event_id, last_error, payload FROM requests"""
+        if user["role"] == "admin":
+            rows = conn.execute(sql + " ORDER BY created_at DESC LIMIT 200").fetchall()
+        else:
+            rows = conn.execute(sql + " WHERE actor_id=? ORDER BY created_at DESC LIMIT 200",
+                                (user["id"],)).fetchall()
+    def formatted(row):
+        data = dict(row)
         if user["role"] != "admin":
             data.pop("payload", None)
         return data
-    return {"requests": [formatted(r) for r in rows]}
+    return {"requests": [formatted(row) for row in rows]}
 
 
 @app.post("/api/v1/admin/requests/{rid}/reject")
