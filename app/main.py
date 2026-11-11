@@ -24,7 +24,7 @@ from app import security
 from pydantic import BaseModel, Field
 
 SCOPE = "https://www.googleapis.com/auth/calendar.events"
-SESSION_COOKIE = "calsync_session"
+SESSION_COOKIE = "__Host-calsync_session"
 MAX_EVENTS_PER_BATCH = 100
 app = FastAPI(title="CalSync Receiver", version="0.1.0", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
@@ -259,6 +259,8 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
             raise HTTPException(429, "Too many login attempts. Retry later")
         if user is None:
             return HTMLResponse("사용자 이름 또는 비밀번호가 올바르지 않습니다.", status_code=401)
+        # Rotate credentials on each login; no old browser token survives re-login.
+        security.revoke_session(conn, request.cookies.get(SESSION_COOKIE))
         max_age = int(os.getenv("CALSYNC_SESSION_MAX_AGE_SECONDS", "43200"))
         token = security.create_session(conn, user["id"], max_age=max_age)
     response = RedirectResponse("/", status_code=303)
