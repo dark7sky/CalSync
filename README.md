@@ -55,6 +55,39 @@ id -g  # CALSYNC_GID 로 사용
 
 생성한 \`secrets/google-token.json\`은 **서버의 해당 디렉터리로 안전하게 전송**하고 파일 권한을 제한해야 합니다. 실행 UID가 파일을 읽고 \`data/\`에 쓰기 가능해야 합니다. 저장소에 \`.env\` 또는 OAuth 토큰을 올리지 마세요.
 
+### 계정 생성 및 접근 권한
+
+서버를 최초 실행한 후 **계정을 별도로 만들어야 로그인할 수 있습니다.** 보안상 기본 관리자나 초기 비밀번호는 제공하지 않습니다.
+
+~~~bash
+docker compose up -d --build
+docker compose exec -it calsync python -m app.security add-user --username admin --role admin
+docker compose exec -it calsync python -m app.security add-user --username sender1 --role submitter
+# 읽기 전용 접속자가 필요한 경우
+docker compose exec -it calsync python -m app.security add-user --username reader1 --role viewer
+
+# 계정 확인, 비밀번호 재설정, 계정 비활성화
+docker compose exec calsync python -m app.security list-users
+docker compose exec -it calsync python -m app.security reset-password --username sender1
+docker compose exec calsync python -m app.security disable-user --username sender1
+~~~
+
+각 계정은 **14자 이상의 비밀번호**를 대화형으로 입력합니다(쉘 명령어 인자로 비밀번호 전달하지 않음). 로그인 시 사용자 이름과 비밀번호를 함께 입력합니다.
+
+- **viewer:** 인증 후 캘린더 읽기만.
+- **submitter:** 캘린더 읽기, 본인의 신규 등록·삭제 요청 및 상태 확인.
+- **admin:** 캘린더 읽기, 전체 요청 검토·승인·거절.
+- OAuth 토큰은 Google 서버 통합 전용이며 접속자에게 배포하지 않습니다.
+
+### 외부 도메인 보안
+
+- 전송 암호화: **클라이언트 ↔ Menlo Browser ↔ HTTPS 443(NPM)**; NPM에서 TLS 종료 후 같은 서버의 비공개 Docker 네트워크로 CalSync 연결. **NPM HTTPS 인증서를 정상 구성하고 Force SSL을 활성화**하세요. Google API도 HTTPS입니다.
+- 인증: Argon2id 비밀번호 해시, 데이터베이스에서 즉시 폐기 가능한 **난수 기반 HttpOnly + Secure + SameSite=Strict 세션 쿠키**. JWT를 브라우저에 저장하지 않습니다.
+- 권한: 모든 이벤트 조회/등록/삭제 요청 및 이력 조회 API는 로그인 필수. 등록/삭제 요청은 submitter/admin만 가능하고, **Google 일정 실제 수정은 admin 승인 필요**.
+- 요청 보호: CSRF 토큰 + Origin 검사, 15분간 동일 사용자 이름 로그인 실패 10회 제한, Content Security Policy, HSTS, X-Frame-Options.
+- 추가 권고: NPM Access List, \`client_max_body_size 1m\`, NPM 수준의 로그인 요청 속도 제한, 서버 OS 방화벽, 최소권한 백업, 전체 디스크 암호화. 이들 NPM/호스트 설정은 애플리케이션 코드만으로 자동 적용되지 않습니다.
+- **TLS는 전송 구간 암호화이지 Google Calendar나 SQLite에 저장되는 내용의 종단 간 암호화(E2EE)는 아닙니다.** \`data/\`와 \`secrets/\`는 호스트 관리자만 접근하도록 제한하세요.
+
 ### 3. Docker 실행
 
 ~~~bash
