@@ -86,11 +86,11 @@
 ## 보안·배포 유의 사항
 
 - 공용 도메인 연결 전 NPM에서 유효한 TLS 인증서, Force SSL 및 필요시 Access List/IP 정책을 적용한다.
-- 애플리케이션에도 로그인 비밀번호·서명 쿠키·CSRF 토큰을 적용한다. 비밀번호는 공개 GitHub에 넣지 않는다.
+- 각 사용자별 계정을 별도로 생성하고 비밀번호는 Argon2id로 해싱한다. 무작위 HttpOnly/Secure/SameSite 쿠키는 서버 DB에서 검증·폐기할 수 있으며, CSRF·Origin 검사와 CSP도 적용한다.
 - NPM과 CalSync는 Docker 사설 네트워크로 연결하고 CalSync의 :8000 포트는 호스트에 공개하지 않는다.
 - NPM의 웹 프록시가 \`Host\`/\`X-Forwarded-Proto\`를 올바르게 전달하는지, Menlo가 Secure Cookie/JS fetch/클립보드 입력을 허용하는지 확인한다.
 - 보안 정책상 캘린더 정보가 외부 개인 서버로 전송될 수 있는지 별도 승인 필요. 전송 제한을 우회하는 설계는 금지.
-- 현재 2역할 공용 암호 구조이며 사용자별 계정·감사·레이트 리미팅·대량 전송 상한 강화는 정식 운영 전 추가 필요.
+- 권한은 viewer(읽기), submitter(읽기/요청), admin(승인/실행)으로 분리하며 제출자는 자신의 요청 이력만 조회한다. 사용자 이름별 인증 실패 횟수를 제한한다. NPM 네트워크 수준 요청 제한·MFA/SSO·감사 로그 강화는 운영 후속 과제다.
 - 데이터 DB, OAuth 자격 증명, 비밀번호, 실 업무 일정을 공개 저장소에 커밋하지 않는다.
 
 ## 남은 과제
@@ -102,3 +102,16 @@
 5. 지속 운영에 필요한 사용자별 로그인·보안 로깅·복구 워커·테스트 강화.
 
 관련: [개발 계획서](PROJECT_PLAN.md), [Google Calendar Events API](https://developers.google.com/workspace/calendar/api/v3/reference/events).
+
+
+## 사용자 인증·암호화 정책 (2026-11-11 추가)
+
+- **전송:** NPM의 유효한 TLS 인증서로 HTTPS 443만 외부 공개. NPM→FastAPI는 같은 호스트의 비공개 Docker 네트워크를 이용한다. Google Calendar 호출 역시 HTTPS.
+- **로그인:** 사용자 이름 + 비밀번호. 비밀번호는 Argon2id 해시로 SQLite에 저장하며 기본 계정/초기 비밀번호는 없다.
+- **세션:** 난수 생성 opaque token은 브라우저 HttpOnly/Secure/SameSite=Strict 쿠키로 전달하고 서버 DB에는 **토큰의 SHA-256 해시**만 저장한다. 서버는 만료, 로그아웃, 계정 비활성화를 즉시 검증할 수 있다. 브라우저용 JWT는 사용하지 않는다.
+- **권한:** viewer는 조회만, submitter는 자기 요청 제출 및 상태 확인, admin은 승인/거절. 모든 데이터 API는 세션 인증이 필요하다. \`/healthz\`는 일반 상태 문자열만 반환한다.
+- **웹 보호:** 상태 변경 POST는 CSRF 토큰과 요청 Origin 검증; CSP, HSTS, frame-ancestors 'none', no-store 등의 헤더 추가. 로그인 실패는 사용자별 15분당 10회 제한.
+- **데이터 보관:** TLS는 전송 중 암호화이고 DB/Google Calendar 저장 데이터의 E2EE를 뜻하지 않는다. 호스트 \`data/\`/OAuth 비밀 파일 접근을 제한하고 필요 시 디스크 암호화를 적용한다.
+- **실운영 추가:** NPM 접근 제한/레이트 리미트, 사용자 수·활동 로그 감사, 재시도 대기 처리, MFA/SSO 필요 여부 검토.
+
+계정 생성 및 변경 CLI, 설치 방법: [README](../README.md).
