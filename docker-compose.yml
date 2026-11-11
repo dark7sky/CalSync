@@ -1,0 +1,22 @@
+services:
+  calsync:
+    build: .
+    container_name: calsync
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data
+      - ./secrets/google-token.json:/run/secrets/google-token.json:ro
+    expose:
+      - "8000"
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 7s
+      retries: 3
+
+# Nginx Proxy Manager를 이 Compose 기본 네트워크에 연결:
+# docker network connect calsync_default <NPM_컨테이너명>
+# Proxy Host upstream: calsync:8000, public HTTPS 443
