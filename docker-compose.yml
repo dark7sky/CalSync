@@ -3,6 +3,8 @@ services:
     build: .
     container_name: calsync
     restart: unless-stopped
+    # Host UID/GID로 실행하여 ./data 와 OAuth 토큰 파일 접근 권한을 맞춥니다.
+    user: "${CALSYNC_UID:-1000}:${CALSYNC_GID:-1000}"
     env_file: .env
     volumes:
       - ./data:/data
