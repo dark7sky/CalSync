@@ -108,12 +108,6 @@ def session(request: Request) -> dict:
     return data
 
 
-def submitter(user: dict = Depends(require_csrf)) -> dict:
-    if user["role"] not in ("submitter", "admin"):
-        raise HTTPException(403, "Submit permission required")
-    return user
-
-
 def require_csrf(request: Request, user: dict = Depends(session),
                  x_csrf_token: str | None = Header(default=None)) -> dict:
     # Cookie SameSite + per-session CSRF token: cross-origin scripts cannot forge POSTs.
@@ -124,6 +118,12 @@ def require_csrf(request: Request, user: dict = Depends(session),
     origin = request.headers.get("origin")
     if origin and origin.rstrip("/") != setting("CALSYNC_PUBLIC_ORIGIN").rstrip("/"):
         raise HTTPException(403, "Unexpected Origin")
+    return user
+
+
+def submitter(user: dict = Depends(require_csrf)) -> dict:
+    if user["role"] not in ("submitter", "admin"):
+        raise HTTPException(403, "Submit permission required")
     return user
 
 
