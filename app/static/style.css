@@ -1,0 +1,32 @@
+
+    :root{font:16px/1.55 system-ui,-apple-system,sans-serif;color:#233040;background:#f3f6fa}
+    *{box-sizing:border-box}
+    body{margin:0}
+    header{background:#18314d;color:white;padding:16px max(18px,calc((100vw - 1080px)/2))}
+    header strong{font-size:1.3rem}
+    main{max-width:1080px;margin:24px auto;padding:0 18px}
+    section{background:#fff;border:1px solid #dce4eb;border-radius:12px;padding:22px;margin-bottom:18px}
+    h2{margin:0 0 12px;font-size:1.1rem}
+    p{margin:10px 0}
+    .muted{color:#64748b}
+    .small{font-size:.88rem}
+    .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+    .row>*{flex:1}
+    label{display:block;margin:10px 0;font-weight:600}
+    label input{display:block;width:100%;margin-top:4px}
+    input,textarea,button{font:inherit;border-radius:6px}
+    input,textarea{border:1px solid #aebccb;padding:9px;background:#fff}
+    textarea{width:100%;height:180px;resize:vertical;font:13px/1.4 ui-monospace,monospace}
+    button{cursor:pointer;border:1px solid #476781;padding:7px 12px;background:white;color:#18314d}
+    button.primary{color:white;background:#21547c;border-color:#21547c}
+    button:disabled{opacity:.55;cursor:default}
+    .message{white-space:pre-wrap;margin:12px 0;padding:10px;background:#f0f4f8;border-radius:6px;min-height:30px}
+    .error{background:#fee2e2;color:#8a2525}
+    .success{background:#dcfce7;color:#14532d}
+    .event,.request{border-top:1px solid #e3e9ef;padding:12px 0}
+    .event:first-child,.request:first-child{border:0}
+    .event strong,.request strong{display:block}
+    .event button,.request button{margin-top:6px;margin-right:6px}
+    @media(max-width:700px){.row>*{flex-basis:100%}}
+  
+header .logout{float:right}
