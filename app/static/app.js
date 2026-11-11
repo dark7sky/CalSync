@@ -57,7 +57,7 @@ async function refreshEvents() {
       text(item, "strong", e.summary);
       text(item, "div", fmtTime(e.start) + " ~ " + fmtTime(e.end));
       if (e.location) text(item, "div", e.location, "muted");
-      button(item, "삭제 요청", async () => {
+      if (role !== "viewer") button(item, "삭제 요청", async () => {
         if (!confirm("이 일정의 삭제 요청을 제출할까요? 실제 삭제는 관리자 승인 후 진행됩니다.")) return;
         await call("/api/v1/requests/delete", {
           method:"POST", body: JSON.stringify({eventId:e.id,expectedEtag:e.etag})
@@ -157,7 +157,12 @@ el("logout").addEventListener("click", async () => {
   try {
     const user = await call("/api/v1/session");
     role = user.role; csrf = user.csrfToken;
-    el("role").textContent = " · " + (role === "admin" ? "관리자" : "제출자");
+    el("role").textContent = " · " + user.username + " (" +
+      (role === "admin" ? "관리자" : role === "viewer" ? "조회자" : "제출자") + ")";
+    if (role === "viewer") {
+      el("singleForm").closest("section").hidden = true;
+      el("importText").closest("section").hidden = true;
+    }
     message("로그인 완료. 날짜/내용을 확인한 후 제출하세요.");
     await Promise.all([refreshEvents(),refreshRequests()]);
   } catch(e) { message(e.message,"error"); }
