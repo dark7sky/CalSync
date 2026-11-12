@@ -1,0 +1,33 @@
+name: Windows client build
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sender/windows/**'
+      - 'tests/test_windows_core.py'
+      - '.github/workflows/windows-client.yml'
+  workflow_dispatch:
+jobs:
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install -r sender/windows/requirements.txt
+          python -m pip install pytest
+      - name: Test local sync engine
+        run: python -m pytest -q tests/test_windows_core.py
+      - name: Validate Qt app import
+        run: python -c "import sys; sys.path.insert(0, 'sender/windows'); import app; print('Qt client imported')"
+      - name: Package Windows executable
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name CalSync --paths sender/windows sender/windows/app.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CalSync-Windows-x64
+          path: dist/CalSync.exe
+          if-no-files-found: error
+          retention-days: 30
