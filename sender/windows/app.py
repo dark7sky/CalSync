@@ -8,6 +8,7 @@ import json
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
+import os
 
 from PySide6.QtCore import QFileSystemWatcher, QSettings, QTimer, Qt, QUrl
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QIcon
@@ -90,6 +91,10 @@ class Client(QMainWindow):
         self.deletions = QLineEdit(self.config.value("deletion_types", ""))
         self.deletions.setPlaceholderText("예: cancelled,deleted (실제 JSON type 값 확인 후 설정)")
         form.addRow("명시적 삭제 type 값", self.deletions)
+        self.autostart = QCheckBox("Windows 로그인 시 자동 실행 (시스템 트레이)")
+        self.autostart.setChecked(self.check_autostart())
+        self.autostart.toggled.connect(self.set_autostart)
+        form.addRow("로그인 자동 실행", self.autostart)
         self.interval = QSpinBox()
         self.interval.setRange(10, 3600)
         self.interval.setValue(int(self.config.value("interval", 30)))
@@ -156,6 +161,42 @@ class Client(QMainWindow):
         self.config.setValue("interval", self.interval.value())
         self.config.setValue("monitor", "true" if self.monitoring else "false")
         self.config.sync()
+
+    def check_autostart(self) -> bool:
+        if sys.platform != "win32":
+            return False
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
+                value, _ = winreg.QueryValueEx(key, "CalSyncWindows")
+                return bool(value)
+        except OSError:
+            return False
+
+    def set_autostart(self, enabled: bool):
+        if sys.platform != "win32":
+            QMessageBox.information(self, "Windows 전용", "로그인 자동 실행은 Windows에서 설정합니다.")
+            return
+        import winreg
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+        command = (f'"{sys.executable}" --tray' if getattr(sys, "frozen", False)
+                   else f'"{sys.executable}" "{Path(__file__).resolve()}" --tray')
+        try:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                if enabled:
+                    winreg.SetValueEx(key, "CalSyncWindows", 0, winreg.REG_SZ, command)
+                else:
+                    try:
+                        winreg.DeleteValue(key, "CalSyncWindows")
+                    except FileNotFoundError:
+                        pass
+            self.log("로그인 자동 실행 " + ("활성화" if enabled else "비활성화"))
+        except OSError as exc:
+            self.autostart.blockSignals(True)
+            self.autostart.setChecked(not enabled)
+            self.autostart.blockSignals(False)
+            QMessageBox.warning(self, "자동 실행 설정 실패", str(exc))
 
     def choose_folder(self):
         choice = QFileDialog.getExistingDirectory(
@@ -354,7 +395,11 @@ def main():
     app.setApplicationName("CalSync Windows")
     app.setQuitOnLastWindowClosed(False)
     client = Client()
-    client.show()
+    # Auto-start only through explicit HKCU Run registration.
+    if "--tray" in sys.argv and QSystemTrayIcon.isSystemTrayAvailable():
+        client.hide()
+    else:
+        client.show()
     sys.exit(app.exec())
 
 
