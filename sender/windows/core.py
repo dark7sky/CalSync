@@ -110,7 +110,9 @@ class Engine:
                         AND status NOT IN ('SUCCEEDED','REJECTED','CONFLICT','cancelled')
                         ORDER BY id DESC LIMIT 1""", (ref,)).fetchone()
                     if is_deleted:
-                        if old and old["google_id"] and old["state"] != "DELETED" and not active:
+                        if old and old["state"] == "DELETED":
+                            continue
+                        if old and old["google_id"] and not active:
                             self.db.execute("""INSERT INTO queue(ref,action,fingerprint,payload,created_at)
                                 VALUES(?,?,?,?,?)""", (ref, "delete", old["fingerprint"],
                                 json_compact({"eventId": old["google_id"]}), int(time.time())))
@@ -205,6 +207,9 @@ class Engine:
                     errors.append(f"requests[{i}]: no matching local batch")
                     continue
                 status = str(item.get("status") or "").upper()
+                if row["status"] == "SUCCEEDED" and status != "SUCCEEDED":
+                    # A stale/older browser export must not roll back confirmed sync.
+                    continue
                 if status not in {"PENDING","APPROVED","PROCESSING","EXECUTING","SUCCEEDED",
                                   "FAILED","REJECTED","CONFLICT"}:
                     errors.append(f"requests[{i}]: unknown status")
