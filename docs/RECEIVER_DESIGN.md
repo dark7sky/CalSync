@@ -115,3 +115,18 @@
 - **실운영 추가:** NPM 접근 제한/레이트 리미트, 사용자 수·활동 로그 감사, 재시도 대기 처리, MFA/SSO 필요 여부 검토.
 
 계정 생성 및 변경 CLI, 설치 방법: [README](../README.md).
+
+
+## Windows 데스크톱 연동 구현 (2026-11-12)
+
+| API | 역할 |
+| --- | --- |
+| \`POST /api/v1/requests/import\` | \`batchId\`와 신규 \`events[]\` 접수(100건 제한, 인증·CSRF) |
+| \`POST /api/v1/requests/delete-batch\` | \`batchId\`와 \`deletions:[{eventId,expectedEtag?}]\` 일괄 삭제 요청(실제 삭제는 관리자 승인 시) |
+| \`GET /api/v1/receipts\` | 사용자의 요청 상태/배치 인덱스/성공한 Google event ID를 브라우저에서 JSON으로 조회 |
+
+Windows 클라이언트는 로컬 파일을 자동 검사하지만 외부 네트워크 직접 POST를 실행하지 않는다. \`batchId\`와 배치 항목 순서(\`batchIndex\`)를 유지하여 브라우저에 제출한 요청 영수증을 정확히 매핑한다. \`SUCCEEDED\`로 승인된 신규 이벤트에 대해서만 Google event ID를 동기화 완료로 저장한다. 미확인 또는 원본 파일 누락만으로 Google 이벤트를 삭제하지 않는다.
+
+완전 자동 전송에는 **공식 승인된 브라우저-로컬 데이터 연동 채널**이 별도로 필요하다. 현재 Menlo 정책에서는 이를 구현 완료라고 주장하지 않는다.
+
+[Windows 클라이언트 안내](../sender/windows/README.md).
