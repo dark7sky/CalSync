@@ -23,6 +23,11 @@ jobs:
         run: python -m pytest -q tests/test_windows_core.py
       - name: Validate Qt app import
         run: python -c "import sys; sys.path.insert(0, 'sender/windows'); import app; print('Qt client imported')"
+      - name: Smoke-test Windows GUI startup
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          python -c "import sys; sys.path.insert(0, 'sender/windows'); from PySide6.QtWidgets import QApplication; from app import Client; qt=QApplication([]); w=Client(); assert 'CalSync' in w.windowTitle(); w.quit(); print('GUI smoke test OK')"
       - name: Package Windows executable
         run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name CalSync --paths sender/windows sender/windows/app.py
       - uses: actions/upload-artifact@v4
