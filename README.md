@@ -1,5 +1,18 @@
 # CalSync
 
+## Windows Desktop 클라이언트
+
+**Windows GUI·JSON 자동 감시·전송 대기열·영수증 동기화·시스템 트레이·Windows 로그인 자동 시작·EXE 빌드**가 추가되었습니다.
+
+- [Windows 실행/설정 안내](sender/windows/README.md)
+- [Windows 소스: GUI](sender/windows/app.py) · [오프라인 동기화 엔진](sender/windows/core.py)
+- [Windows EXE 다운로드 (GitHub Actions 성공한 실행의 Artifacts)](https://github.com/dark7sky/CalSync/actions/workflows/windows-client.yml)
+
+**Menlo 제약:** PC의 직접 외부 연결이 차단되어 있어, 클라이언트가 로컬 JSON을 자동 스캔하고 전송 대기열을 준비하더라도 **Menlo 웹페이지에서 사용자가 붙여넣기/제출해야 합니다.** 서버에서 승인한 결과를 반영하려면 웹의 영수증 JSON을 Windows 앱으로 가져오세요. 공식적으로 승인된 프로그램-브라우저 전달 경로 없이 완전 무인 동기화를 보장하지 않습니다.
+
+감시 중 X 버튼을 누르면 **트레이로 / 완전히 종료 / 취소**를 선택할 수 있고, 로그인 시 트레이 자동 실행도 설정할 수 있습니다.
+
+
 **Menlo Security Browser를 이용하는 사용자의 Google Calendar 일정 수신 서비스**입니다. 수신부는 Docker + FastAPI + Google Calendar API로 구성하고 Nginx Proxy Manager를 통해 HTTPS 도메인에 연결합니다. 로컬 JSON 자동 분석·전송 준비는 가벼운 Python 스크립트로 제공하며, 외부로 직접 통신하지 않습니다.
 
 > **현재 상태:** 수신부 MVP 소스와 Docker 설정이 리포지터리에 있습니다. 실제 도메인, Google OAuth 및 Menlo 환경에서 실행·통합 검증한 상태는 아닙니다. 배포 전 아래 검증 단계를 진행하세요.
