@@ -140,11 +140,31 @@ el("importText").addEventListener("input", () => { pendingBatchId=null; });
 el("sendBatch").addEventListener("click", async () => {
   try {
     const input = JSON.parse(el("importText").value);
-    const events = Array.isArray(input) ? input : Array.isArray(input.events) ? input.events : [input];
-    if (!pendingBatchId) pendingBatchId = batchId();
-    await submitEvents(events, pendingBatchId);
+    // Windows app preserves batchId across retries so request imports stay idempotent.
+    const id = input && typeof input.batchId === "string"
+      ? input.batchId : (pendingBatchId || (pendingBatchId = batchId()));
+    if (input && Array.isArray(input.deletions)) {
+      const data = await call("/api/v1/requests/delete-batch", {
+        method:"POST", body:JSON.stringify({batchId:id,deletions:input.deletions})
+      });
+      message(data.requests.length + "건의 삭제 요청을 접수했습니다.", "success");
+      await refreshRequests();
+    } else {
+      const events = Array.isArray(input) ? input
+        : Array.isArray(input.events) ? input.events : [input];
+      await submitEvents(events, id);
+    }
     el("importText").value="";
     pendingBatchId=null;
+  } catch(err) { message(err.message, "error"); }
+});
+el("exportReceipts").addEventListener("click", async () => {
+  try {
+    const exportData = await call("/api/v1/receipts");
+    el("receiptText").value = JSON.stringify(exportData, null, 2);
+    el("receiptText").focus();
+    el("receiptText").select();
+    message("요청 상태 JSON을 선택했습니다. 복사하여 Windows 클라이언트에서 가져오세요.", "success");
   } catch(err) { message(err.message, "error"); }
 });
 el("refreshEvents").addEventListener("click", refreshEvents);
