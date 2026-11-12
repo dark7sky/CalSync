@@ -34,7 +34,7 @@
   </section>
 
   <section>
-    <h2>JSON 일괄 등록 요청</h2>
+    <h2>JSON 일괄 생성 / 삭제 요청</h2>
     <p class="muted small">클라이언트가 준비한 JSON 이벤트 배열, 단일 이벤트 객체 또는 {"events":[...]} 형태를 붙여넣으세요. 전송되는 이벤트 내용은 subject/startTime/endTime/chair/location만 사용합니다. 한 번에 최대 100개입니다.</p>
     <textarea id="importText" spellcheck="false" placeholder='[{"subject":"예시 일정","startTime":{"dateTime":"2026-11-12T10:00:00+09:00","timeZone":"Asia/Seoul"},"endTime":{"dateTime":"2026-11-12T11:00:00+09:00","timeZone":"Asia/Seoul"},"chair":{"displayName":"가상 사용자"},"location":"예시 장소"}]'></textarea>
     <p><button id="sendBatch" class="primary">일괄 생성 요청 제출</button></p>
@@ -44,6 +44,14 @@
   <section>
     <div class="row"><h2>요청 및 처리 현황</h2><button id="refreshRequests">새로고침</button></div>
     <div id="requests" aria-live="polite"></div>
+  </section>
+
+  <section>
+    <h2>Windows 클라이언트 동기화 영수증</h2>
+    <p class="muted small">요청의 처리 상태를 확인해 Windows 프로그램에 붙여넣으세요.
+    SUCCEEDED 결과가 확인되어야 Windows 클라이언트가 실제 반영으로 기록합니다.</p>
+    <button id="exportReceipts">요청 상태 JSON 생성</button>
+    <textarea id="receiptText" readonly spellcheck="false" aria-label="수신 상태 JSON"></textarea>
   </section>
 
   <div id="message" class="message" role="status">준비 중</div>
