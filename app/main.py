@@ -229,6 +229,11 @@ class DeleteRequest(BaseModel):
     expectedEtag: str | None = Field(default=None, max_length=512)
 
 
+class DeleteBatch(BaseModel):
+    batchId: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    deletions: list[DeleteRequest] = Field(min_length=1, max_length=MAX_EVENTS_PER_BATCH)
+
+
 @app.get("/healthz")
 def health():
     return {"status": "ok"}
@@ -377,6 +382,72 @@ def request_delete(body: DeleteRequest, user: dict = Depends(submitter)):
             (rid, "delete", "{}", body.eventId, existing.get("etag"), "PENDING",
              user["username"], user["id"], now_iso()))
     return {"requestId": rid, "status": "PENDING"}
+
+
+
+@app.post("/api/v1/requests/delete-batch")
+def request_delete_batch(body: DeleteBatch, user: dict = Depends(submitter)):
+    """Idempotent deletion import. All targets must belong to the fixed calendar."""
+    scoped_batch = user["id"] + ":" + body.batchId
+    validated = []
+    svc = calendar()
+    for i, item in enumerate(body.deletions):
+        try:
+            existing = svc.events().get(
+                calendarId=setting("CALSYNC_CALENDAR_ID"), eventId=item.eventId
+            ).execute()
+        except HttpError as exc:
+            if exc.resp.status == 404:
+                raise HTTPException(404, f"deletions[{i}] not found")
+            raise HTTPException(502, f"deletions[{i}] lookup failed")
+        if item.expectedEtag and item.expectedEtag != existing.get("etag"):
+            raise HTTPException(409, f"deletions[{i}] was modified")
+        validated.append((item.eventId, existing.get("etag")))
+    results = []
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        for i, (event_id, etag) in enumerate(validated):
+            payload = json.dumps({"eventId": event_id}, sort_keys=True)
+            existing = conn.execute(
+                "SELECT id,operation,event_id,status FROM requests WHERE batch_key=? AND batch_index=?",
+                (scoped_batch, i),
+            ).fetchone()
+            if existing:
+                if existing["operation"] != "delete" or existing["event_id"] != event_id:
+                    raise HTTPException(409, "batchId reused with different delete operation")
+                results.append({"requestId": existing["id"], "status": existing["status"]})
+                continue
+            rid = uuid.uuid4().hex
+            conn.execute("""INSERT INTO requests
+                (id,batch_key,batch_index,operation,payload,event_id,expected_etag,
+                 status,actor,actor_id,created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (rid, scoped_batch, i, "delete", payload, event_id, etag, "PENDING",
+                 user["username"], user["id"], now_iso()))
+            results.append({"requestId": rid, "status": "PENDING"})
+    return {"batchId": body.batchId, "requests": results}
+
+
+@app.get("/api/v1/receipts")
+def export_receipts(user: dict = Depends(session)):
+    """Browser-side status export for disconnected Windows client handoff."""
+    with db() as conn:
+        sql = """SELECT id, batch_key, batch_index, operation, status, google_event_id
+            FROM requests WHERE batch_key IS NOT NULL"""
+        if user["role"] == "admin":
+            rows = conn.execute(sql + " ORDER BY created_at DESC LIMIT 1000").fetchall()
+        else:
+            rows = conn.execute(sql + " AND actor_id=? ORDER BY created_at DESC LIMIT 1000",
+                                (user["id"],)).fetchall()
+    return {"requests": [
+        {"batchId": r["batch_key"].split(":", 1)[1],
+         "batchIndex": r["batch_index"],
+         "requestId": r["id"], "operation": r["operation"],
+         "status": r["status"],
+         "googleEventId": r["google_event_id"] if r["operation"] == "create" and
+             r["status"] == "SUCCEEDED" else None}
+        for r in rows
+    ]}
 
 
 @app.get("/api/v1/requests")
