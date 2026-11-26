@@ -442,3 +442,61 @@ def test_google_reconnect_requires_admin(client, tmp_path, monkeypatch):
     headers = {"X-CSRF-Token": client.get("/api/v1/session").json()["csrfToken"]}
     assert client.post("/api/v1/admin/google/reconnect", headers=headers).status_code == 403
     assert client.get("/api/v1/admin/google/status", headers=headers).status_code == 403
+
+
+def test_windows_delete_batch_and_receipt_api(client, monkeypatch):
+    from app import main as module
+
+    class Response:
+        def execute(self):
+            return {"id": "remote-id-1", "etag": '"etag-1"'}
+
+    class FakeEvents:
+        def get(self, **kwargs):
+            assert kwargs["calendarId"] == "example@example.com"
+            return Response()
+
+        def delete(self, **kwargs):
+            assert kwargs["calendarId"] == "example@example.com"
+            assert kwargs["eventId"] == "remote-id-1"
+
+            class Deletion:
+                headers = {}
+
+                def execute(self):
+                    return {}
+
+            return Deletion()
+
+    class FakeService:
+        def events(self):
+            return FakeEvents()
+
+    monkeypatch.setattr(module, "calendar", lambda: FakeService())
+    client.post("/login", data={
+        "username": "submitter", "password": "super-secret-password-2026"
+    }, follow_redirects=False)
+    csrf = client.get("/api/v1/session").json()["csrfToken"]
+    headers = {"X-CSRF-Token": csrf, "Origin": "https://calendar.example.com"}
+    original = {
+        "batchId": "deletebatch123",
+        "deletions": [{"eventId": "remote-id-1"}]
+    }
+    first = client.post("/api/v1/requests/delete-batch", json=original, headers=headers)
+    assert first.status_code == 200, first.text
+    assert first.json()["requests"][0]["status"] == "SUCCEEDED"
+    second = client.post("/api/v1/requests/delete-batch", json=original, headers=headers)
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    receipt = client.get("/api/v1/receipts")
+    assert receipt.status_code == 200
+    row = receipt.json()["requests"][0]
+    assert row["batchId"] == "deletebatch123"
+    assert row["batchIndex"] == 0
+    assert row["requestId"] == first.json()["requests"][0]["requestId"]
+    assert row["status"] == "SUCCEEDED"
+    assert row["googleEventId"] is None
+    assert client.post("/api/v1/requests/delete-batch", json={
+        "batchId": "deletebatch123",
+        "deletions": [{"eventId": "other-event"}]
+    }, headers=headers).status_code == 409

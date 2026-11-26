@@ -1,4 +1,4 @@
-# CalSync 프로젝트 계획서 v0.3
+# CalSync 프로젝트 계획서 v0.4
 
 - 갱신: 2026-11-11
 - 우선순위: **수신부(Docker, Nginx Proxy Manager, Google Calendar) 우선 구축**, 송신부는 최소 프로토타입만 제공하며 상세 완성은 사용자 측에서 수행.
@@ -134,3 +134,18 @@
 - 조회/전송 API 전부 로그인 필수. 등록·삭제 요청은 submitter 또는 admin, Google API 실제 쓰기는 admin 승인 시만 허용.
 - 로그인 실패 제한, CSRF, Origin, CSP/HSTS 등 기본 보안 적용. 인프라 방화벽/프록시 요청 제한은 별도 설정 필요.
 - TLS는 **전송 중 암호화**이며 저장 데이터의 E2EE는 제공하지 않는다. DB와 OAuth 토큰 파일은 서버측 접근 제한 대상이다.
+
+
+## Windows 클라이언트 구현 반영 (2026-11-12)
+
+- Windows용 Qt GUI: \`sender/windows/app.py\`.
+- 로컬 JSON 자동 감시·명시적 삭제 상태·SQLite 대기열·재시작 복원: \`sender/windows/core.py\`.
+- 사용자 조작에 의한 브라우저 전송: 준비된 JSON을 복사하여 Menlo 웹페이지에서 제출.
+- 서버 응답 확인: 웹의 \`GET /api/v1/receipts\`에서 요청 상태 JSON 생성 → Windows 클라이언트에 붙여넣어 반영.
+- 수신 API: \`POST /api/v1/requests/import\` (신규) 및 \`POST /api/v1/requests/delete-batch\` (삭제, ID/ETag 검증).
+- 시스템 트레이 닫기 확인: 감시 중 X를 누르면 **트레이로 / 완전히 종료 / 취소**. 트레이에서 시작/중지·스캔·복원·종료 가능.
+- Windows 사용자별 로그인 시작 자동 실행 옵션(HKCU Run).
+- GitHub Actions \`windows-client.yml\`에서 단위 테스트·Qt 시작 스모크 테스트·PyInstaller EXE 빌드 및 아티팩트 업로드.
+- **미해결 환경 제약**: Menlo의 로컬 파일 반출 정책을 우회하지 않으므로, 완전 무인 서버 업로드는 지원하지 않는다. 원본 JSON의 실제 삭제 \`type\` 값과 정책 승인 여부는 검증이 필요하다.
+
+자세한 사용자 안내: [Windows Client README](../sender/windows/README.md).

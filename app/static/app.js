@@ -185,6 +185,7 @@ el("importText").addEventListener("input", () => { pendingBatchId=null; });
 el("sendBatch").addEventListener("click", async () => {
   try {
     const input = JSON.parse(el("importText").value);
+    // Windows app preserves batchId across retries so request imports stay idempotent.
     const id = input && typeof input.batchId === "string"
       ? input.batchId : (pendingBatchId || (pendingBatchId = batchId()));
     if (input && Array.isArray(input.deletions)) {
