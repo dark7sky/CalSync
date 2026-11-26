@@ -1,4 +1,4 @@
-# CalSync result_s.json -> CalSync 서버 전송 스크립트
+﻿# CalSync result_s.json -> CalSync 서버 전송 스크립트
 # 사내 프록시(McAfee, NTLM SSO) + Menlo UA 정책 + 사내 TLS CA(Windows 인증서 저장소)를
 # PowerShell/.NET 기능으로 통과한다. 별도 라이브러리 불필요.
 #

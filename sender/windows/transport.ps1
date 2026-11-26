@@ -1,4 +1,4 @@
-# CalSync Windows transport: JSON-in / JSON-out HTTPS transport for the GUI client.
+﻿# CalSync Windows transport: JSON-in / JSON-out HTTPS transport for the GUI client.
 # Passes the corporate McAfee proxy with NTLM SSO (DefaultCredentials) and a
 # browser User-Agent (Menlo gateway blocks non-browser agents). Requires the
 # corporate TLS CA in the Windows certificate store (SSL interception).

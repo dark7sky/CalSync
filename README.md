@@ -2,13 +2,14 @@
 
 ## Windows Desktop 클라이언트
 
-**Windows GUI·JSON 자동 감시·전송 대기열·영수증 동기화·시스템 트레이·Windows 로그인 자동 시작·EXE 빌드**가 추가되었습니다.
+**Windows GUI·JSON 자동 감시·전송 대기열·자동 전송·영수증 동기화·시스템 트레이·Windows 로그인 자동 시작·EXE 빌드**가 추가되었습니다.
 
 - [Windows 실행/설정 안내](sender/windows/README.md)
-- [Windows 소스: GUI](sender/windows/app.py) · [오프라인 동기화 엔진](sender/windows/core.py)
+- [Windows 소스: GUI](sender/windows/app.py) · [오프라인 동기화 엔진](sender/windows/core.py) · [Menlo 경유 전송](sender/windows/menlo.py) · [자격 증명](sender/windows/credentials.py)
+- [send.ps1 — PowerShell CLI 전송](sender/send.ps1)
 - [Windows EXE 다운로드 (GitHub Actions 성공한 실행의 Artifacts)](https://github.com/dark7sky/CalSync/actions/workflows/windows-client.yml)
 
-**Menlo 제약:** PC의 직접 외부 연결이 차단되어 있어, 클라이언트가 로컬 JSON을 자동 스캔하고 전송 대기열을 준비하더라도 **Menlo 웹페이지에서 사용자가 붙여넣기/제출해야 합니다.** 서버에서 승인한 결과를 반영하려면 웹의 영수증 JSON을 Windows 앱으로 가져오세요. 공식적으로 승인된 프로그램-브라우저 전달 경로 없이 완전 무인 동기화를 보장하지 않습니다.
+**Menlo 제약과 전송 경로:** Menlo는 PC에서 나가는 `POST`를 격리 셸(200 HTML)로 대체하므로 원시 HTTP POST는 서버에 도달하지 않습니다(`GET`은 통과). Windows 클라이언트의 **서버로 직접 전송**은 설치된 Edge를 Playwright로 조작해 Menlo 셸에 렌더링된 CalSync 화면에 입력·제출하므로 자동 전송이 가능합니다(폼 제출은 Menlo 클라우드 브라우저에서 발생하며 서버에는 Origin `null`로 도착 → 서버 `.env`에 `CALSYNC_ALLOWED_ORIGINS=null` 필요). 직접 POST가 허용되는 네트워크에서는 `sender/send.ps1` 같은 PowerShell 경로를 바로 쓸 수 있고, 수동 복사/붙여넣기 워크플로도 대체 경로로 유지됩니다.
 
 감시 중 X 버튼을 누르면 **트레이로 / 완전히 종료 / 취소**를 선택할 수 있고, 로그인 시 트레이 자동 실행도 설정할 수 있습니다.
 
@@ -21,8 +22,8 @@
 
 ~~~text
 [접속자 PC JSON]
-   → sender/prepare.py (오프라인 5개 필드 추출)
-   → 사용자가 Menlo 브라우저에 복사/입력 (붙여넣기 허용 여부 확인 필요)
+   → sender/prepare.py (오프라인 5개 필드 추출) 또는 Windows 클라이언트 자동 감시
+   → Menlo 브라우저에 복사/입력, 또는 Windows 클라이언트가 Edge 자동화로 화면 제출
    → https://calendar.example.com (Nginx Proxy Manager :443)
    → Docker: calsync:8000 (FastAPI)
    → 인증된 제출자의 요청을 즉시 처리
@@ -30,7 +31,7 @@
    → 서버에서 지정한 1개 Google Calendar
 ~~~
 
-Menlo 브라우저 내 일반 Form POST 또는 JS fetch POST를 사용합니다. **PC 프로그램이 외부 서버에 직접 POST하는 방식은 사용하지 않습니다.** JSON에 쓰이는 내용 필드는 \`subject\`, \`startTime\`, \`endTime\`, \`chair\`, \`location\`의 다섯 개이며, 그 외 \`type\`/\`uid\`/\`calendarId\`/\`attendees\`/\`URL\`은 Google 이벤트 콘텐츠로 전송하지 않습니다.
+Menlo 브라우저 내 일반 Form POST 또는 JS fetch POST를 사용합니다. **Menlo 환경에서는 PC 프로그램의 원시 HTTP POST가 격리 셸로 차단**되므로, 자동 전송도 브라우저 화면 조작(Windows 클라이언트)으로 수행합니다. 직접 POST가 허용된 네트워크에서는 `sender/send.ps1`을 사용할 수 있습니다. JSON에 쓰이는 내용 필드는 \`subject\`, \`startTime\`, \`endTime\`, \`chair\`, \`location\`의 다섯 개이며, 그 외 \`type\`/\`uid\`/\`calendarId\`/\`attendees\`/\`URL\`은 Google 이벤트 콘텐츠로 전송하지 않습니다.
 
 ## 서버 설치
 
@@ -163,6 +164,9 @@ python sender/prepare.py my-events.json > prepared.json
 - \`app/static/index.html\`: Menlo 웹 화면 (GET/POST)
 - \`scripts/google_oauth_setup.py\`: 운영자 1회 OAuth 발급
 - \`sender/prepare.py\`: JSON 오프라인 변환기(네트워크 통신 없음)
+- \`sender/send.ps1\`: PowerShell CLI 전송기(로그인→일괄 등록→영수증 확인, 사내 NTLM 프록시·사내 TLS CA·브라우저 UA 대응). 직접 POST가 허용된 네트워크용
+- \`sender/windows/\`: Windows 데스크톱 클라이언트 — GUI·JSON 감시·대기열(`core.py`), Menlo 경유 자동 전송(`menlo.py`), 자격 증명 관리(`credentials.py`), 보존용 직접 전송(`transport.py`/`transport.ps1`), PyInstaller 빌드(`build.ps1`). 상세는 [sender/windows/README.md](sender/windows/README.md)
+- \`sender/windows/assets/make_icon.py\`: 아이콘(PNG/ICO) 생성기 — 바이너리 아이콘은 이 스크립트로 재생성
 - \`docs/RECEIVER_DESIGN.md\`: 구체 수신/배포 아키텍처 및 API
 - \`docs/PROJECT_PLAN.md\`: 전체 프로젝트 계획
 

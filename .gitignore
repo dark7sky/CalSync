@@ -9,3 +9,4 @@ secrets/
 token.json
 credentials.json
 *.db
+sender/windows/assets/_debug16.png
