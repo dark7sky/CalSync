@@ -12,7 +12,7 @@
    → 사용자가 Menlo 브라우저에 복사/입력 (붙여넣기 허용 여부 확인 필요)
    → https://calendar.example.com (Nginx Proxy Manager :443)
    → Docker: calsync:8000 (FastAPI)
-   → 관리자 승인
+   → 인증된 제출자의 요청을 즉시 처리
    → Google Calendar API (서버 운영자 OAuth)
    → 서버에서 지정한 1개 Google Calendar
 ~~~
@@ -24,7 +24,7 @@ Menlo 브라우저 내 일반 Form POST 또는 JS fetch POST를 사용합니다.
 ### 1. Google Calendar API OAuth 준비
 
 1. Google Cloud 프로젝트 생성 및 **Google Calendar API 활성화**.
-2. OAuth 동의 화면을 구성하고, **Desktop app** 유형 OAuth 클라이언트를 생성.
+2. OAuth 동의 화면을 구성하고, **Desktop app** 유형 OAuth 클라이언트를 생성. 웹 재연결(아래)을 쓸 경우 이 클라이언트의 승인된 redirect URI에 `<CALSYNC_PUBLIC_ORIGIN>/oauth/callback`을 추가합니다.
 3. 운영자 PC에 클라이언트 JSON을 \`credentials.json\`으로 내려받습니다. 저장소에는 커밋하지 않습니다.
 4. 지정 Google Calendar에 편집 권한이 있는 **운영자 Google 계정**으로 다음 명령을 실행합니다.
 
@@ -35,6 +35,7 @@ python scripts/google_oauth_setup.py --credentials credentials.json --output sec
 ~~~
 
 이 동의로 \`https://www.googleapis.com/auth/calendar.events\` 권한이 부여됩니다. Refresh Token은 서버 측에서만 사용합니다. **개인 계정/Workspace 관리 정책과 OAuth 게시 상태에 따라 사용 승인이 필요할 수 있습니다.**
+발급받은 토큰은 서버 DB에 저장되며, 만료 시 관리자는 CalSync 웹의 **"Google 계정 재연결"** 버튼으로 갱신할 수 있습니다(관리자 세션 + 일회용 state로 보호, 동의 완료 시 브라우저가 아니라 서버에만 토큰이 저장). 재연결에는 위 redirect URI 등록과 \`credentials.json\`의 컨테이너 읽기 전용 마운트(기본 Compose 설정에 포함)가 필요합니다.
 
 ### 2. 서버 환경변수
 
@@ -49,8 +50,6 @@ id -g  # CALSYNC_GID 로 사용
 
 - \`CALSYNC_CALENDAR_ID\`: Google Calendar 설정에서 확인한 정확한 Calendar ID.
 - \`CALSYNC_PUBLIC_ORIGIN\`: 실제 HTTPS 주소(예: \`https://calendar.example.com\`, 뒤에 경로/슬래시 없음).
-- \`CALSYNC_SESSION_SECRET\`: 무작위 32자 이상.
-- \`CALSYNC_SUBMITTER_PASSWORD\`, \`CALSYNC_ADMIN_PASSWORD\`: 서로 다른 충분히 강한 비밀번호.
 - \`CALSYNC_UID\`, \`CALSYNC_GID\`: 호스트에서 \`id -u\`, \`id -g\` 결과.
 
 생성한 \`secrets/google-token.json\`은 **서버의 해당 디렉터리로 안전하게 전송**하고 파일 권한을 제한해야 합니다. 실행 UID가 파일을 읽고 \`data/\`에 쓰기 가능해야 합니다. 저장소에 \`.env\` 또는 OAuth 토큰을 올리지 마세요.
@@ -75,15 +74,15 @@ docker compose exec calsync python -m app.security disable-user --username sende
 각 계정은 **14자 이상의 비밀번호**를 대화형으로 입력합니다(쉘 명령어 인자로 비밀번호 전달하지 않음). 로그인 시 사용자 이름과 비밀번호를 함께 입력합니다.
 
 - **viewer:** 인증 후 캘린더 읽기만.
-- **submitter:** 캘린더 읽기, 본인의 신규 등록·삭제 요청 및 상태 확인.
-- **admin:** 캘린더 읽기, 전체 요청 검토·승인·거절.
+- **submitter:** 캘린더 읽기, 일정 즉시 등록·삭제, 본인 처리 상태 확인.
+- **admin:** 동일한 일정 변경 권한과 전체 처리 내역 확인, 기존 대기·실패 건 관리.
 - OAuth 토큰은 Google 서버 통합 전용이며 접속자에게 배포하지 않습니다.
 
 ### 외부 도메인 보안
 
 - 전송 암호화: **클라이언트 ↔ Menlo Browser ↔ HTTPS 443(NPM)**; NPM에서 TLS 종료 후 같은 서버의 비공개 Docker 네트워크로 CalSync 연결. **NPM HTTPS 인증서를 정상 구성하고 Force SSL을 활성화**하세요. Google API도 HTTPS입니다.
 - 인증: Argon2id 비밀번호 해시, 데이터베이스에서 즉시 폐기 가능한 **난수 기반 HttpOnly + Secure + SameSite=Strict 세션 쿠키**. JWT를 브라우저에 저장하지 않습니다.
-- 권한: 모든 이벤트 조회/등록/삭제 요청 및 이력 조회 API는 로그인 필수. 등록/삭제 요청은 submitter/admin만 가능하고, **Google 일정 실제 수정은 admin 승인 필요**.
+- 권한: 모든 이벤트 조회/등록/삭제 요청 및 이력 조회 API는 로그인 필수. submitter/admin의 등록·삭제는 승인 없이 Google 일정에 즉시 반영됩니다.
 - 요청 보호: CSRF 토큰 + Origin 검사, 15분간 동일 사용자 이름 로그인 실패 10회 제한, Content Security Policy, HSTS, X-Frame-Options.
 - 추가 권고: NPM Access List, \`client_max_body_size 1m\`, NPM 수준의 로그인 요청 속도 제한, 서버 OS 방화벽, 최소권한 백업, 전체 디스크 암호화. 이들 NPM/호스트 설정은 애플리케이션 코드만으로 자동 적용되지 않습니다.
 - **TLS는 전송 구간 암호화이지 Google Calendar나 SQLite에 저장되는 내용의 종단 간 암호화(E2EE)는 아닙니다.** \`data/\`와 \`secrets/\`는 호스트 관리자만 접근하도록 제한하세요.
@@ -120,14 +119,18 @@ NPM의 Proxy Host 설정:
 
 실제 프로젝트 네트워크명은 \`docker network ls\` 및 \`docker inspect calsync\`로 확인하세요. NPM 컨테이너를 재생성하면 수동 네트워크 연결이 사라질 수 있으므로 NPM Compose에 CalSync 네트워크를 **external network**로 명시하는 배포 구성이 권장됩니다.
 
-브라우저에서 \`https://도메인/login\`에 접속하여 \`CALSYNC_SUBMITTER_PASSWORD\` 또는 \`CALSYNC_ADMIN_PASSWORD\`로 로그인합니다. NPM의 별도 접근 제한 및 요청 레이트 리미팅도 권장합니다.
+브라우저에서 \`https://도메인/login\`에 접속하여 생성한 사용자 이름과 비밀번호로 로그인합니다. NPM의 별도 접근 제한 및 요청 레이트 리미팅도 권장합니다.
 
-## 수신 및 승인
+## 수신 및 즉시 반영
 
 - 접속자: Google Calendar 일정 조회 → **신규 일정 입력/JSON 일괄 붙여넣기** → 생성 요청 → 처리 상태 확인.
-- 접속자: 일정의 **삭제 요청** 버튼 → 해당 Google event ID와 ETag로 요청 생성.
-- 관리자: 요청 목록에서 승인/거절. **승인한 경우에만 Google Calendar에 실제 insert/delete**.
-- 전송 중 오류로 같은 batchId를 재제출해도 동일 접수 요청을 반환합니다.
+- 접속자: 일정의 **삭제** 버튼 → Google event ID와 ETag를 확인하고 즉시 삭제.
+- 등록·삭제는 요청별로 즉시 실행되며 결과는 \`SUCCEEDED\`, \`FAILED\`, \`CONFLICT\` 등의 상태로 표시됩니다.
+- 같은 batchId와 내용을 재제출하면 성공 건은 중복 생성하지 않고 실패 건만 재시도합니다. 일부 실패 가능성이 있으므로 각 상태를 확인해야 합니다.
+- Sender가 만든 \`batchId\`는 웹 입력 시 그대로 유지됩니다. Sender의 \`deletions\` 일괄 요청도 즉시 실행되며, 재전송 시 이미 삭제된 일정을 다시 삭제하지 않습니다.
+- 웹의 **요청 상태 JSON 생성**을 눌러 결과를 복사한 뒤 Sender에 가져오세요. 결과에는 로그인 계정이 제출한 최근 1,000건의 상태와 성공한 생성 건의 Google event ID가 포함됩니다.
+- 이전 버전의 대기 건은 자동 실행되지 않으며 관리자가 별도 처리할 수 있습니다.
+- 관리자 전용: **Google 계정 연결** 섹션에서 토큰 상태 확인·재연결, **거부된 요청 기록**에서 422·409로 거부된 요청의 원본 데이터와 사유를 확인합니다(최근 100건).
 - 최대 일괄 건수: 100개. 동일 캘린더만 사용합니다.
 - JSON에서 단순 파일 누락은 삭제 요청이 아닙니다.
 
@@ -143,7 +146,7 @@ python sender/prepare.py my-events.json > prepared.json
 
 ## 소스 위치
 
-- \`app/main.py\`: FastAPI, 인증/CSRF, Google Calendar 연동, 승인 워크플로
+- \`app/main.py\`: FastAPI, 인증/CSRF, Google Calendar 즉시 반영·처리 이력·거부 원본 기록·Google 재연결
 - \`app/static/index.html\`: Menlo 웹 화면 (GET/POST)
 - \`scripts/google_oauth_setup.py\`: 운영자 1회 OAuth 발급
 - \`sender/prepare.py\`: JSON 오프라인 변환기(네트워크 통신 없음)
@@ -152,7 +155,7 @@ python sender/prepare.py my-events.json > prepared.json
 
 ## 운영 전 필수 확인
 
-- Google API 인증·캘린더 편집 권한 및 OAuth 게시 상태
+- Google API 인증·캘린더 편집 권한 및 OAuth 게시 상태. **동의 화면이 "테스트" 상태면 Refresh Token이 발급 후 7일 만료되므로 장기 운영은 프로덕션 게시를 권장합니다.**
 - Menlo 브라우저에서 로그인/쿠키/JS fetch/클립보드 정책 확인
 - NPM HTTPS/인증/IP 제한, 호스트 및 컨테이너 토큰 파일 접근 권한 확인
 - 실제 JSON 샘플의 구조·종일 일정 종료일 의미 확인

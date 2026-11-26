@@ -9,6 +9,7 @@ services:
     volumes:
       - ./data:/data
       - ./secrets/google-token.json:/run/secrets/google-token.json:ro
+      - ./credentials.json:/run/secrets/google-credentials.json:ro
     expose:
       - "8000"
     networks:

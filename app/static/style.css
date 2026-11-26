@@ -30,3 +30,4 @@
     @media(max-width:700px){.row>*{flex-basis:100%}}
   
 header .logout{float:right}
+pre.raw{white-space:pre-wrap;word-break:break-all;font:12px/1.4 ui-monospace,monospace;background:#f0f4f8;padding:8px;border-radius:6px;margin:6px 0}

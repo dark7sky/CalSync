@@ -1,0 +1,48 @@
+<!doctype html><html lang="ko"><meta charset="utf-8">
+<title>CalSync 개인정보처리방침</title><meta name="viewport" content="width=device-width">
+<link rel="stylesheet" href="/static/style.css">
+<body><header><strong>CalSync</strong></header>
+<main>
+<section>
+<h2>개인정보처리방침</h2>
+<p class="muted small">시행일: 2026-11-20 · 서비스: CalSync (work.ysyoo.link)</p>
+<p>CalSync(이하 "서비스")는 지정된 Google Calendar에 일정을 등록·삭제하기 위한 사내 목적의 자가 호스팅 동기화 서비스입니다. 본 방침은 서비스가 수집·이용·보관하는 정보와 그 처리 기준을 안내합니다.</p>
+</section>
+<section>
+<h2>1. 수집하는 정보</h2>
+<p>서비스는 다음 정보를 수집합니다.</p>
+<p>· 로그인 계정 정보: 사용자 이름과 비밀번호. 비밀번호는 Argon2id로 일방향 해시 처리되어 저장되며 원문은 어디에도 보관되지 않습니다.<br>
+· 일정 동기화 데이터: 제출된 JSON에서 제목(subject), 시작/종료 시간(startTime/endTime), 장소(location), 주최자 표시명(chair.displayName)만을 추출하여 처리합니다.<br>
+· 세션 쿠키: 로그인 유지를 위한 난수 기반 토큰(HttpOnly/Secure/SameSite=Strict)이며, 서버에는 토큰의 해시만 저장됩니다.<br>
+· Google OAuth 토큰: Google Calendar API 호출을 위해 서버에만 보관되며, 접속자 브라우저나 로컬 프로그램에는 제공되지 않습니다.</p>
+</section>
+<section>
+<h2>2. 이용 목적</h2>
+<p>수집된 정보는 다음 목적 외에는 사용되지 않습니다.</p>
+<p>· 지정된 Google Calendar에 일정 등록·삭제 수행<br>
+· 서비스 로그인 및 역할(viewer/submitter/admin) 기반 접근 권한 관리<br>
+· 접수·처리 이력 기록(누가 언제 무엇을 제출했는지 감사 목적)</p>
+</section>
+<section>
+<h2>3. 제3자 제공</h2>
+<p>서비스는 수집된 정보를 Google Calendar API(Google LLC) 호출을 위한 최소 범위 외에 어떤 제3자에게도 제공·판매하지 않습니다. 일정 데이터는 운영자가 지정한 1개의 Google Calendar에만 기록됩니다.</p>
+</section>
+<section>
+<h2>4. 보관 및 보호</h2>
+<p>· 데이터는 자가 호스팅 서버의 SQLite 데이터베이스에 저장되며, 브라우저↔서버 구간은 HTTPS/TLS로 암호화됩니다.<br>
+· OAuth 토큰 파일과 비밀번호 해시는 서버 운영자만 접근할 수 있도록 파일 권한을 제한합니다.<br>
+· 서비스에 광고·분석·추적 스크립트는 포함되어 있지 않습니다.</p>
+</section>
+<section>
+<h2>5. 보유 기간 및 파기</h2>
+<p>· 로그인 계정 정보는 계정 삭제 시 즉시 파기됩니다.<br>
+· 접수·처리 이력은 동기화 누락 확인 등 운영상 필요한 최소 기간 동안 보관 후 파기됩니다.<br>
+· Google OAuth 토큰은 사용자가 Google 계정 설정에서 액세스를 철회하거나 운영자가 삭제할 때까지 서버에 보관됩니다.</p>
+</section>
+<section>
+<h2>6. 운영자 및 문의</h2>
+<p>서비스 운영자: CalSync 관리자(dark7sky@gmail.com)<br>
+개인정보 관련 문의, 열람·정정·삭제 요청은 위 이메일로 접수해 주시기 바랍니다.</p>
+<p class="muted small">본 방침은 관련 법령 또는 서비스 변경에 따라 수정될 수 있으며, 변경 시 시행일과 함께 본 페이지에 공지합니다.</p>
+</section>
+</main></body></html>
